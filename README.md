@@ -8,6 +8,8 @@ The first target is the Nubia Z60 Ultra (`cerro`, Snapdragon 8 Gen 3), with an A
 
 ## Status and delivery
 
+**[Download Lastphone 0.1.0 alpha 1 for ARM64](https://github.com/qqrm/lastphone/releases/tag/v0.1.0-alpha.1).** The release contains the APK, SHA-256 and verification reports from [successful build 44325291474](https://github.com/qqrm/lastphone/actions/runs/44325291474), source revision `bc18a4d0322056ee040ad3d0524460ca309117db`. All **18 Android instrumentation tests** passed with networking disabled. See the [exact validation results and limits](docs/ANDROID_VALIDATION.md).
+
 Implementation and automated validation are tracked in [Android build and device tests](https://github.com/qqrm/lastphone/actions/workflows/android.yml). A successful run produces the **tested ARM64 APK**, its SHA-256 and test reports. Android emulator tests exercise real JNI inference and native document handling. GPU speed, thermal behavior and battery use require measurements on the physical phone; an emulator result does not establish those properties.
 
 The initial artifact is a **debug-signed development build**. A production release must use a persistent owner-controlled signing key; the repository does not contain a private signing key. See [Android build and validation](mobile/android/README.md) and [functional coverage](docs/LASTPHONE_PARITY.md).
