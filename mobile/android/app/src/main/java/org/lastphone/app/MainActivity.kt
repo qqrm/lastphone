@@ -50,6 +50,7 @@ class MainActivity : ComponentActivity() {
     private var pendingExport: Triple<ByteArray, String, JavaScriptReplyProxy>? = null
     private var fullScreen: View? = null
     private var fullScreenCallback: WebChromeClient.CustomViewCallback? = null
+    private val notificationAccess = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     private val treePicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri == null) { treeCallback?.invoke(null); treeCallback = null }
@@ -60,11 +61,8 @@ class MainActivity : ComponentActivity() {
         else {
             val callback = fileCallback; fileCallback = null
             showStatus("Copying the selected file…")
-            host.worker.execute {
-                try {
-                    val copied = files.importFile(uri, File(host.dataRoot, "imports")) { text -> runOnUiThread { showStatus(text) } }
-                    runOnUiThread { showStatus(""); callback?.invoke(copied.absolutePath) }
-                } catch (error: Throwable) { runOnUiThread { showError("File import failed", error); callback?.invoke(null) } }
+            runImport("File import failed", callback) { transfer ->
+                files.importFile(uri, File(host.dataRoot, "imports"), transfer::check) { text -> runOnUiThread { showStatus(text) } }
             }
         }
     }
@@ -134,6 +132,7 @@ class MainActivity : ComponentActivity() {
 
     @Suppress("SetJavaScriptEnabled")
     private fun configureWebView() {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         web.settings.apply {
             javaScriptEnabled = true
@@ -217,7 +216,14 @@ class MainActivity : ComponentActivity() {
         }
         val url = data.optString("url")
         val path = Uri.parse(url).path
-        if (path in listOf("/__bridge/stream/start", "/api/setup/start", "/api/setup/resume", "/api/setup/retry")) startWork()
+        if (path in listOf("/__bridge/stream/start", "/api/setup/start", "/api/setup/resume", "/api/setup/retry")) {
+            try { startWork(dataSync = path?.startsWith("/api/setup/") == true) }
+            catch (error: Throwable) {
+                posts.decrementAndGet()
+                reply(proxy, JSONObject().put("id", id).put("error", error.message ?: "Cannot start foreground work"))
+                return
+            }
+        }
         host.worker.execute {
             try {
                 require(sameOrigin(Uri.parse(url)) && data.optString("method") == "POST") { "Invalid request origin or method" }
@@ -236,7 +242,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun reply(proxy: JavaScriptReplyProxy, value: JSONObject) { runOnUiThread { if (!isDestroyed) proxy.postMessage(value.toString()) } }
+    private fun reply(proxy: JavaScriptReplyProxy, value: JSONObject) {
+        runOnUiThread {
+            if (!isDestroyed && WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+                proxy.postMessage(value.toString())
+            }
+        }
+    }
     private fun sameOrigin(uri: Uri) = uri.scheme == "https" && uri.host == "lastphone.invalid" && uri.port == -1 && uri.userInfo == null
     private fun refused(code: Int = 403, message: String = "Network access is blocked") = WebResourceResponse(
         "text/plain", "utf-8", code, if (code == 403) "Forbidden" else "Error", mapOf("Cache-Control" to "no-store"), ByteArrayInputStream(message.toByteArray()))
@@ -248,6 +260,10 @@ class MainActivity : ComponentActivity() {
                 val url = host.startUrl()
                 runOnUiThread {
                     if (isDestroyed) return@runOnUiThread
+                    if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                        showStatus("Update Android System WebView to open Lastphone.")
+                        return@runOnUiThread
+                    }
                     documentScript?.remove()
                     documentScript = WebViewCompat.addDocumentStartJavaScript(web, script, setOf(EngineHost.ORIGIN))
                     web.loadUrl(url)
@@ -323,12 +339,22 @@ class MainActivity : ComponentActivity() {
     }
     private fun copyTree(uri: Uri) {
         val callback = treeCallback; treeCallback = null
+        val libraryRequired = requireLibrary
         showStatus("Checking the selected folder…")
+        runImport("Folder import failed", callback) { transfer ->
+            files.importTree(uri, libraryRequired, transfer::check) { text -> runOnUiThread { showStatus(text) } }
+        }
+    }
+    private fun runImport(title: String, callback: ((String?) -> Unit)?, copy: (TransferControl.Ticket) -> File) {
+        val transfer = host.transfers.begin()
+        try { startWork(dataSync = true) }
+        catch (error: Throwable) { transfer.close(); showError(title, error); callback?.invoke(null); return }
         host.worker.execute {
             try {
-                val imported = files.importTree(uri, requireLibrary) { text -> runOnUiThread { showStatus(text) } }
+                val imported = copy(transfer)
                 runOnUiThread { showStatus(""); callback?.invoke(imported.absolutePath) }
-            } catch (error: Throwable) { runOnUiThread { showError("Folder import failed", error); callback?.invoke(null) } }
+            } catch (error: Throwable) { runOnUiThread { if (!isDestroyed) showError(title, error); callback?.invoke(null) } }
+            finally { transfer.close() }
         }
     }
 
@@ -406,7 +432,14 @@ class MainActivity : ComponentActivity() {
             }.setNeutralButton("Stop sharing") { _, _ -> host.worker.execute { host.call("stop_lan") } }
             .setNegativeButton("Cancel", null).show()
     }
-    private fun startWork() { ContextCompat.startForegroundService(this, Intent(this, WorkService::class.java)) }
+    private fun startWork(dataSync: Boolean = false) {
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            && !host.preferences.getBoolean("notifications_asked", false)) {
+            host.preferences.edit().putBoolean("notifications_asked", true).apply()
+            notificationAccess.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        ContextCompat.startForegroundService(this, Intent(this, WorkService::class.java).putExtra("data_sync", dataSync))
+    }
     private fun hideFullScreen() {
         fullScreen?.let { it.keepScreenOn = false; (it.parent as? ViewGroup)?.removeView(it) }
         fullScreen = null
@@ -418,7 +451,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         treeCallback?.invoke(null); fileCallback?.invoke(null)
         if (host.activity === this) host.activity = null
-        documentScript?.remove()
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) documentScript?.remove()
         hideFullScreen()
         if (::web.isInitialized) { web.stopLoading(); web.destroy() }
         super.onDestroy()

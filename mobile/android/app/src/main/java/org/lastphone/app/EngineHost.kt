@@ -23,6 +23,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** The original engine owns routes, budgets, validation, indexing and chat. */
 class EngineHost(private val context: Context) {
@@ -32,6 +33,9 @@ class EngineHost(private val context: Context) {
         init { System.loadLibrary("c++_shared") }
     }
     val worker = Executors.newFixedThreadPool(8)
+    val transfers = TransferControl()
+    private val control = Executors.newSingleThreadExecutor()
+    private val cancellationQueued = AtomicBoolean()
     val main = Handler(Looper.getMainLooper())
     val preferences = context.getSharedPreferences("lastphone", Context.MODE_PRIVATE)
     val native = NativePlatform(context)
@@ -47,6 +51,7 @@ class EngineHost(private val context: Context) {
         initialized = future
         worker.execute {
             try {
+                PortableFiles(context).cleanupInterruptedCopies()
                 if (!Python.isStarted()) Python.start(AndroidPlatform(context))
                 // Reinstalling the same development version must refresh packaged web assets too.
                 val installedAt = context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
@@ -74,6 +79,16 @@ class EngineHost(private val context: Context) {
 
     fun engine(): PyObject = start().get(180, TimeUnit.SECONDS)
     fun call(name: String, vararg args: Any?): PyObject = engine().callAttr(name, *args)
+    /** A Stop action must not queue behind eight long-poll requests or imports. */
+    fun cancelWork() {
+        transfers.cancel()
+        if (cancellationQueued.compareAndSet(false, true)) control.execute {
+            try {
+                try { native.llmCancel() } catch (_: Throwable) { }
+                try { call("cancel_work") } catch (_: Throwable) { }
+            } finally { cancellationQueued.set(false) }
+        }
+    }
     fun startUrl(): String = engine().get("start_url")!!.toString()
     fun topScript(): String = call("top_script").toString()
 

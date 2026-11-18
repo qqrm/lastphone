@@ -68,6 +68,7 @@ class _Runtime:
         self.active = 0
         self.lan_sockets = set()
         self.index_thread = None
+        self.current = threading.local()
 
 
 def _close_connections(server):
@@ -96,8 +97,11 @@ def _owned_handler(base, runtime, server):
                     runtime.lan_sockets.add(connection)
                 runtime.condition.notify_all()
             try:
+                runtime.current.exchange = getattr(args[0], "ex", None) if args else None
+                runtime.current.connection = connection
                 super().__init__(*args, **kwargs)
             finally:
+                runtime.current.exchange = runtime.current.connection = None
                 _close_connections(server)
                 with runtime.condition:
                     if connection is not None:
@@ -188,6 +192,20 @@ class Engine:
                 server.INDEX.status.update(state="error", note="Semantic model could not load: " + type(error).__name__)
             assistant.init(server, server.INDEX)
             attach(assistant, llm, self.local)
+            original_chat = assistant.chat
+            def chat(messages, about, emit, cancelled):
+                # The desktop Handler learns about disconnection on its next
+                # write. Android's polled stream can stop before the first
+                # token, during native loading or prefill: forward that signal
+                # without waiting for a failed output write.
+                exchange = getattr(runtime.current, "exchange", None)
+                connection = getattr(runtime.current, "connection", None)
+                def stopped():
+                    return (runtime.stop.is_set() or cancelled()
+                            or (exchange is not None and exchange.stopped)
+                            or (connection is not None and connection.fileno() < 0))
+                return original_chat(messages, about, emit, stopped)
+            assistant.chat = chat
             server.Handler = _owned_handler(server.Handler, runtime, server)
             target = server
             api.opened(self.settings, self.data, note)

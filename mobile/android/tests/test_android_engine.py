@@ -32,6 +32,8 @@ class Native:
         self.output = "A useful answer [S1]."
         self.outputs = []
         self.slow = False
+        self.block_load = self.block_prefill = False
+        self.load_started, self.prefill_started = threading.Event(), threading.Event()
         self.template = "<|im_start|>{{ messages }}<|im_end|>"
 
     def llmCapabilities(self):
@@ -44,11 +46,21 @@ class Native:
     def llmLoad(self, path, options):
         self.cancel_event.clear()
         self.events.append(("load", path, json.loads(options)))
+        self.load_started.set()
+        if self.block_load:
+            if not self.cancel_event.wait(5):
+                raise RuntimeError("Loading did not receive cancellation")
+            return '{"ev":"error","code":"cancel","msg":"Loading cancelled"}'
         return json.dumps({"ev": "ready", "fit": {"status": "fits"}})
 
     def llmGenerate(self, request, callback):
         self.cancel_event.clear()
         self.events.append(("generate", json.loads(request)))
+        self.prefill_started.set()
+        if self.block_prefill:
+            if not self.cancel_event.wait(5):
+                raise RuntimeError("Prefill did not receive cancellation")
+            return '{"ev":"done","reason":"cancel"}'
         output = self.outputs.pop(0) if self.outputs else self.output
         for piece in output:
             if self.cancel_event.is_set():
@@ -337,6 +349,37 @@ class RealEngine(unittest.TestCase):
         self.assertEqual(old_runtime.active, 0)
         self.assertIn(b"After cancel", self.get("/api/doc/manual")[2])
         self.assertFalse(json.loads(self.engine.work_state())["chat"])
+
+    def cancel_stream_before_first_token(self, started):
+        status, headers, _ = self.post("/__bridge/stream/start", {"messages": [{"role": "user", "content": "water"}]}, {"Content-Type": "application/octet-stream"})
+        self.assertEqual(status, 200)
+        self.assertTrue(started.wait(3))
+        sid = headers["X-Bridge-Stream"]
+        status, _, _ = self.post("/__bridge/stream/" + sid + "/cancel", {}, {"Content-Type": "application/octet-stream"})
+        self.assertEqual(status, 200)
+        # This is exactly the chat Stop route; no Engine.cancel_work() or
+        # fabricated output write is allowed to deliver native cancellation.
+        self.assertTrue(self.native.cancel_event.wait(2))
+        runtime = self.engine._runtime
+        with runtime.condition:
+            self.assertTrue(runtime.condition.wait_for(lambda: runtime.active == 0, timeout=2))
+        self.assertFalse(self.engine.local.generating)
+
+    def test_chat_stop_interrupts_prefill_without_a_first_token(self):
+        self.select_model()
+        self.native.block_prefill = True
+        self.cancel_stream_before_first_token(self.native.prefill_started)
+
+    def test_chat_stop_interrupts_model_loading_without_a_first_token(self):
+        self.select_model()
+        self.native.block_load = True
+        self.cancel_stream_before_first_token(self.native.load_started)
+        self.assertEqual(self.engine.local.state, "stopped")
+
+    def test_native_errors_keep_the_desktop_msg_explanation(self):
+        self.select_model()
+        with mock.patch.object(self.native, "llmLoad", return_value='{"ev":"error","code":"too_big","msg":"Model needs more available memory"}'):
+            self.assertEqual(self.engine.local.ensure_running(), "Model needs more available memory")
 
     def test_response_lifetime_releases_budget_and_keeps_library_files(self):
         response = self.engine.request("GET", android.ORIGIN + "/api/topics")

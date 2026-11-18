@@ -1,17 +1,23 @@
 package org.lastphone.app
 
+import android.Manifest
 import android.content.Context
+import android.graphics.Bitmap
+import android.os.Build
 import android.util.Base64
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.rule.GrantPermissionRule
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
+import org.junit.Rule
+import org.junit.rules.TestName
 import org.junit.runner.RunWith
 import java.io.File
 import java.io.ByteArrayInputStream
@@ -26,6 +32,10 @@ import com.chaquo.python.Python
 /** Actual APK -> WebView -> Chaquopy -> unchanged Lastbook core integration. */
 @RunWith(AndroidJUnit4::class)
 class EngineIntegrationTest {
+    @get:Rule val testName = TestName()
+    @get:Rule val notificationPermission: GrantPermissionRule = GrantPermissionRule.grant(
+        *if (Build.VERSION.SDK_INT >= 33) arrayOf(Manifest.permission.POST_NOTIFICATIONS) else emptyArray()
+    )
     private lateinit var host: EngineHost
     private lateinit var scenario: ActivityScenario<MainActivity>
     private lateinit var root: File
@@ -41,7 +51,20 @@ class EngineIntegrationTest {
         scenario = ActivityScenario.launch(MainActivity::class.java)
         awaitJs("document.readyState === 'complete' && document.querySelector('#main') !== null")
     }
-    @After fun closeScreen() { scenario.close() }
+    @After fun closeScreen() {
+        try {
+            val instrumentation = InstrumentationRegistry.getInstrumentation()
+            val evidence = File(instrumentation.targetContext.filesDir, "test-evidence").apply { mkdirs() }
+            instrumentation.uiAutomation.takeScreenshot()?.let { bitmap ->
+                File(evidence, "${testName.methodName}.png").outputStream().use {
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+                }
+                bitmap.recycle()
+            }
+        } finally {
+            if (::scenario.isInitialized) scenario.close()
+        }
+    }
 
     private fun copy(context: Context, path: String, output: File) {
         val children = context.assets.list(path) ?: emptyArray()
@@ -109,10 +132,15 @@ class EngineIntegrationTest {
         val (status, transcript) = get("/api/transcript/fixture-video")
         assertEquals(200, status)
         assertTrue(String(transcript).contains("Second caption for seeking"))
+        val cues = JSONObject(String(transcript)).getJSONArray("cues")
+        assertEquals(2, cues.length())
+        assertEquals(12, cues.getJSONObject(1).getInt("t"))
         js("location.hash='#/watch/fixture-video'; true")
         awaitJs("document.querySelector('video') !== null && document.querySelector('video').readyState >= 1", 45)
-        js("document.querySelector('video').currentTime=1; true")
-        awaitJs("document.querySelector('video').currentTime >= 0.9")
+        awaitJs("document.querySelector('.cue[data-t=\"12\"]') !== null")
+        js("document.querySelector('.cue[data-t=\"12\"]').click(); true")
+        awaitJs("document.querySelector('video').currentTime >= 11.9")
+        js("document.querySelector('video').pause(); true")
     }
 
     @Test fun javascriptPostsUseTheActualAuthenticatedToolLoop() {

@@ -403,6 +403,7 @@ extern "C" JNIEXPORT jstring JNICALL Java_org_lastphone_app_nativebridge_NativeL
         if (cancel_epoch.load() != epoch) return result(env, failure("cancel", "Model loading was cancelled."));
         engine.reset(); // release the old model before reserving memory for its replacement
         json measured = fit(path, params);
+        if (cancel_epoch.load() != epoch) return result(env, failure("cancel", "Model loading was cancelled."));
         if (measured.value("ev", "") == "error") return result(env, measured);
         if (measured.value("status", "") != "fits") {
             json error = failure("too_big", "The configured model and context do not fit available memory.");
@@ -418,9 +419,13 @@ extern "C" JNIEXPORT jstring JNICALL Java_org_lastphone_app_nativebridge_NativeL
         params.context.abort_callback_data = next.get();
         const auto start = Clock::now();
         next->model = llama_model_load_from_file(path.c_str(), params.model);
-        if (!next->model) return result(env, failure(next->cancelled() ? "cancel" : "load", "The model could not be loaded."));
+        if (!next->model) return result(env, next->cancelled()
+            ? failure("cancel", "Model loading was cancelled.")
+            : failure("load", "The model could not be loaded."));
         next->context = llama_init_from_model(next->model, params.context);
-        if (!next->context) return result(env, failure("context", "There is not enough memory for the configured context."));
+        if (!next->context) return result(env, next->cancelled()
+            ? failure("cancel", "Model loading was cancelled.")
+            : failure("context", "There is not enough memory for the configured context."));
         if (next->cancelled()) return result(env, failure("cancel", "Model loading was cancelled."));
         next->vocab = llama_model_get_vocab(next->model);
         char description[256]{};

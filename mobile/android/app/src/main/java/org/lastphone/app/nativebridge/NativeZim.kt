@@ -50,7 +50,9 @@ class NativeZim(context: Context) : AutoCloseable {
 
     @Synchronized fun read(path: String, entryPath: String): ByteArray {
         val item = archive(path).getEntryByPath(entryPath).getItem(true)
-        require(item.size <= 64L * 1024 * 1024) { "Encyclopedia entry exceeds the inline reader limit." }
+        // Match app/bridge.py WHOLE_MAX. Its 64 MiB large-lane budget is a
+        // backpressure threshold, not an individual-entry size limit.
+        require(item.size <= 256L * 1024 * 1024) { "Encyclopedia entry exceeds the inline reader limit." }
         val data = item.data
         return try { data.data } finally { data.dispose() }
     }

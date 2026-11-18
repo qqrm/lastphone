@@ -124,7 +124,8 @@ bash ../../tools/android/run_emulator_tests.sh
 ```
 
 The script requires a 4 KB page-size x86_64 image, runs real instrumentation and
-retains device properties, memory information and logcat in
+enables airplane mode with Wi-Fi and mobile data disabled before starting the app.
+It retains per-test screenshots, a final UI dump, device properties, memory information and logcat in
 `app/build/reports/emulator`. Use at least 4 GB emulator RAM. Tests exercise actual
 JNI GGUF inference, cancellation/reuse, PDF rendering, ZIM reading/search, ONNX
 execution, the embedded Python engine, web transport and Android lifecycle.
@@ -181,8 +182,10 @@ the debug key is never substituted for a production key.
 
 ## Remaining device acceptance
 
-The original regression suite passed 335 tests with four platform/fixture skips
-under standard Python 3.13 on 2026-11-18. Build, package and instrumentation status
+The original regression suite passed 335 tests with four platform/fixture skips,
+and the Android host adapter suite passed 22 tests under standard Python 3.13 on
+2026-11-18. Both ABI builds, their three JVM unit tests and package audits have
+also passed locally. Build, package and instrumentation status
 should be read from the matching GitHub Actions run and its reports.
 
 The target phone's device tree does not establish its RAM capacity, installed

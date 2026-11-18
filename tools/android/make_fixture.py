@@ -46,15 +46,15 @@ def make(destination: Path):
         '<!doctype html><title>Offline article fixture</title><h1>Offline article fixture</h1><p>Тест: вода и поход.</p>'
         '<script>parent.__untrustedExecuted=true</script><img src="https://example.invalid/tracker.png">', encoding="utf-8")
     (lib / "text/fixture-html.txt").write_text("Тестовый документ: вода, поход и автономная библиотека.", encoding="utf-8")
-    (lib / "transcripts/fixture.vtt").write_text("WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nOffline video fixture\n\n00:00:01.000 --> 00:00:02.000\nSecond caption for seeking\n", encoding="utf-8")
+    (lib / "transcripts/fixture.vtt").write_text("WEBVTT\n\n00:00:00.000 --> 00:00:02.000\nOffline video fixture\n\n00:00:12.000 --> 00:00:14.000\nSecond caption for seeking\n", encoding="utf-8")
     subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=darkgreen:s=160x90:r=10",
-                    "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100", "-t", "2", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100", "-t", "14", "-c:v", "libx264", "-pix_fmt", "yuv420p",
                     "-c:a", "aac", "-movflags", "+faststart", "-metadata", "title=Lastphone synthetic fixture", str(lib / "videos/fixture.mp4")], check=True)
     records = [
         {"id": "fixture-pdf", "kind": "pdf", "path": "documents/fixture.pdf", "title": "Water test manual", "pages": 1},
         {"id": "fixture-html", "kind": "html", "path": "pages/fixture.html", "title": "Вода: тестовый документ"},
-        {"id": "fixture-video", "kind": "video", "path": "videos/fixture.mp4", "title": "Offline video fixture", "duration": 2},
-        {"id": "fixture-transcript", "kind": "transcript", "path": "transcripts/fixture.vtt", "title": "Offline video fixture captions", "video_path": "videos/fixture.mp4"},
+        {"id": "fixture-video", "kind": "video", "path": "videos/fixture.mp4", "title": "Offline video fixture", "duration": 14, "captions": ["transcripts/fixture.vtt"]},
+        {"id": "fixture-transcript", "kind": "transcript", "path": "transcripts/fixture.vtt", "vtt_path": "transcripts/fixture.vtt", "title": "Offline video fixture captions", "video_path": "videos/fixture.mp4"},
     ]
     for record in records:
         record.update(collection="Test fixtures", category="test", publisher="Lastphone test suite", bytes=(lib / record["path"]).stat().st_size)

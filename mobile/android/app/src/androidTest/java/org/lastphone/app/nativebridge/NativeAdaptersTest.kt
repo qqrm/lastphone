@@ -35,7 +35,8 @@ class NativeAdaptersTest {
 
     @Test fun pdfUsesRealPageGeometryAndRenderer() {
         val file = File(directory, "pages.pdf")
-        PdfDocument().use { pdf ->
+        val pdf = PdfDocument()
+        try {
             for ((number, dimensions) in listOf(300 to 600, 600 to 300).withIndex()) {
                 val page = pdf.startPage(PdfDocument.PageInfo.Builder(dimensions.first, dimensions.second, number + 1).create())
                 page.canvas.drawColor(Color.WHITE)
@@ -43,7 +44,7 @@ class NativeAdaptersTest {
                 pdf.finishPage(page)
             }
             file.outputStream().use { pdf.writeTo(it) }
-        }
+        } finally { pdf.close() }
         assertEquals(2, NativePdf.pageCount(file.path))
         val sizes = JSONArray(NativePdf.pageSizes(file.path))
         assertEquals(300, sizes.getJSONArray(0).getInt(0))

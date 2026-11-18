@@ -27,7 +27,7 @@ def _json(value):
     if not isinstance(result, dict):
         raise RuntimeError("Invalid response from the native model runtime")
     if result.get("ev") == "error" or result.get("error"):
-        raise RuntimeError(str(result.get("message") or result.get("error") or result.get("code") or "Native model error"))
+        raise RuntimeError(str(result.get("message") or result.get("msg") or result.get("error") or result.get("code") or "Native model error"))
     return result
 
 
@@ -277,6 +277,8 @@ class NativeLocal:
         if cancelled() or self.closed.is_set():
             return "stopped"
         with self.gen_lock:
+            if cancelled() or self.closed.is_set():
+                return "stopped"
             if self.state == "ready":
                 self.cancelled.clear()
                 self.last_used = time.monotonic()
@@ -288,9 +290,17 @@ class NativeLocal:
             if on_wait:
                 on_wait(None)
             t0 = time.monotonic()
+            done = threading.Event()
+            def watch():
+                while not done.wait(0.05):
+                    if cancelled() or self.cancelled.is_set() or self.closed.is_set():
+                        # Repeat until JNI returns, including cancellation
+                        # racing with entry into its progress-callback scope.
+                        self.native.llmCancel()
+            threading.Thread(target=watch, daemon=True, name="android-model-load-cancel").start()
             try:
                 info = _json(self.native.llmLoad(str(self.path), json.dumps(self.options())))
-                if cancelled() or self.cancelled.is_set():
+                if cancelled() or self.cancelled.is_set() or self.closed.is_set():
                     self.native.llmUnload()
                     self.state = "stopped"
                     return "stopped"
@@ -301,8 +311,13 @@ class NativeLocal:
                 self.state, self.message, self.last_used = "ready", "", time.monotonic()
                 return None
             except Exception as error:
+                if cancelled() or self.cancelled.is_set() or self.closed.is_set():
+                    self.state, self.message = "stopped", ""
+                    return "stopped"
                 self.state, self.message = "error", str(error)
                 return self.message
+            finally:
+                done.set()
 
     def generate(self, segments, max_tokens, cancelled, on_text):
         with self.gen_lock:
@@ -317,7 +332,6 @@ class NativeLocal:
                 while not done.wait(0.05):
                     if cancelled() or self.cancelled.is_set() or self.closed.is_set():
                         self.native.llmCancel()
-                        return
 
             threading.Thread(target=watch, daemon=True, name="android-model-cancel").start()
 

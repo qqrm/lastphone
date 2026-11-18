@@ -1,0 +1,67 @@
+name: Publish tested Android preview
+
+on:
+  workflow_run:
+    workflows: ['Android build and device tests']
+    types: [completed]
+    branches: [main]
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: android-preview-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      LASTPHONE_RUN: ${{ github.event.workflow_run.id }}
+      LASTPHONE_SHA: ${{ github.event.workflow_run.head_sha }}
+      LASTPHONE_TAG: v0.1.0-alpha.1
+    steps:
+      # This job executes no code from the downloaded artifacts. Only the APK
+      # which passed the Android workflow is published, with its exact source SHA.
+      - name: Publish immutable development preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$LASTPHONE_TAG" >/dev/null 2>&1; then
+            echo "The initial preview already exists; a later release needs a new version tag."
+            exit 0
+          fi
+          gh run download "$LASTPHONE_RUN" --name lastphone-arm64-debug-tested --dir apk
+          (cd apk && sha256sum --check app-phone-debug.apk.sha256)
+          gh run download "$LASTPHONE_RUN" --name android-verification-reports --dir reports
+          cp apk/app-phone-debug.apk lastphone-0.1.0-alpha.1-arm64.apk
+          sha256sum lastphone-0.1.0-alpha.1-arm64.apk > SHA256SUMS
+          zip -q -r lastphone-verification-reports.zip reports
+          cat > release-notes.md <<EOF
+          Android development preview of Lastphone, based on the original Lastbook engine and interface.
+
+          **Install:** download the ARM64 APK, install it on Android 10 or newer, then open an existing Lastbook data folder or use Settings → Library downloads and repair. Select a GGUF under Settings → Local AI. No Termux, root or ROM flashing is required.
+
+          **Validation:** original engine regression tests, Android adapter tests, both APK builds, lint, JVM tests, signature/ABI/16-KB ARM64 ELF checks, and real Android 36 instrumentation in airplane mode. The report archive includes device logs and UI evidence. CPU and Vulkan backends are compiled; GPU throughput and thermal behavior on the physical Nubia Z60 Ultra have not been measured.
+
+          **Development signing:** this APK is debug-signed. A future production release needs the owner's persistent signing key. Keep the portable library outside app-managed storage when preserving it across uninstall/reinstall.
+
+          Source: https://github.com/$GH_REPO/commit/$LASTPHONE_SHA
+
+          Verified build: https://github.com/$GH_REPO/actions/runs/$LASTPHONE_RUN
+
+          No production model weights or full content packs are bundled. The combined Android app is GPL-3.0-or-later; upstream files and dependencies retain their notices.
+          EOF
+          gh release create "$LASTPHONE_TAG" \
+            --target "$LASTPHONE_SHA" --prerelease --latest=false \
+            --title 'Lastphone 0.1.0 alpha 1 — Android development preview' \
+            --notes-file release-notes.md \
+            lastphone-0.1.0-alpha.1-arm64.apk SHA256SUMS lastphone-verification-reports.zip

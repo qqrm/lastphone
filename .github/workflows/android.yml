@@ -97,6 +97,18 @@ jobs:
       - name: Verify Python engine adapter
         run: python3 -B -m unittest discover -s mobile/android/tests -v
 
+      - name: Restore pinned native build cache
+        id: native-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            mobile/ipad/build/deps/llama.cpp
+            mobile/android/app/.cxx
+            mobile/android/app/build/intermediates/cxx
+          key: ${{ runner.os }}-lastphone-native-v1-${{ hashFiles('tools/android/toolchain.lock.json', 'mobile/android/app/build.gradle.kts', 'mobile/android/app/src/main/cpp/CMakeLists.txt', 'mobile/android/app/src/main/cpp/cmake/**') }}-${{ hashFiles('mobile/android/app/src/main/cpp/llama_jni.cpp') }}
+          restore-keys: |
+            ${{ runner.os }}-lastphone-native-v1-${{ hashFiles('tools/android/toolchain.lock.json', 'mobile/android/app/build.gradle.kts', 'mobile/android/app/src/main/cpp/CMakeLists.txt', 'mobile/android/app/src/main/cpp/cmake/**') }}-
+
       - name: Prepare pinned native sources
         run: bash mobile/ipad/scripts/prepare_dependencies.sh
 
@@ -112,6 +124,16 @@ jobs:
           ./gradlew --no-daemon --max-workers=2
           assemblePhoneDebug assembleEmulatorDebug assembleEmulatorDebugAndroidTest
           lintPhoneDebug lintEmulatorDebug testPhoneDebugUnitTest testEmulatorDebugUnitTest
+
+      - name: Preserve native compilation for follow-up fixes
+        if: always() && !cancelled() && github.event_name != 'pull_request' && steps.native-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            mobile/ipad/build/deps/llama.cpp
+            mobile/android/app/.cxx
+            mobile/android/app/build/intermediates/cxx
+          key: ${{ steps.native-cache.outputs.cache-primary-key }}
 
       - name: Verify ARM64 APK signature and all 16 KB ELF alignments
         run: >-
