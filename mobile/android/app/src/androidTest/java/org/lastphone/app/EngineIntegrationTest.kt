@@ -181,6 +181,22 @@ class EngineIntegrationTest {
             result = engine.local.generate([['Once upon a time', False]], 24, lambda: False, pieces.append)
             assert result.get('n_gen', 0) > 0, result
             assert ''.join(pieces).strip(), 'JNI tokens were lost crossing the Python callback'
+            # Echo the exact id through both native return paths, independently
+            # of the tiny model's output language or token boundaries.
+            from lastphone_llm import _callback
+            unicode_id = 'Київ · Привет · 漢字 · 😀\x00tail'
+            unicode_events = []
+            unicode_request = json.dumps({
+                'id': unicode_id, 'segments': [['Once upon a time', False]],
+                'max_tokens': 2, 'temp': 0, 'seed': 1, 'stop': [],
+            }, ensure_ascii=False)
+            assert 'Київ' in unicode_request and '😀' in unicode_request
+            unicode_done = json.loads(str(engine.native.llmGenerate(
+                unicode_request, _callback(lambda raw: unicode_events.append(json.loads(raw))))))
+            assert unicode_events, 'No native events received for the Unicode round trip'
+            assert all(event.get('id') == unicode_id for event in unicode_events), unicode_events
+            assert unicode_done.get('ev') == 'done', unicode_done
+            assert unicode_done.get('id') == unicode_id, unicode_done
             engine.local.stop('test completed')
         """.trimIndent()
         builtins.callAttr("exec", script, scope, scope)
