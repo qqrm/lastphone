@@ -26,7 +26,11 @@ import java.util.concurrent.TimeUnit
 
 /** The original engine owns routes, budgets, validation, indexing and chat. */
 class EngineHost(private val context: Context) {
-    companion object { const val ORIGIN = "https://lastphone.invalid" }
+    companion object {
+        const val ORIGIN = "https://lastphone.invalid"
+        // Load the APK's NDK runtime before Chaquopy or ReLinker can load an older copy.
+        init { System.loadLibrary("c++_shared") }
+    }
     val worker = Executors.newFixedThreadPool(8)
     val main = Handler(Looper.getMainLooper())
     val preferences = context.getSharedPreferences("lastphone", Context.MODE_PRIVATE)

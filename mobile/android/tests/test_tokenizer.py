@@ -36,6 +36,7 @@ class TokenizerParity(unittest.TestCase):
         self.compare(["", "Boil clean water for one minute.", "Café À bientôt!", "İı ÄÖÜ ß ﬁ naïve", "你好，世界。東京",
                       "Привет, мир! Вода и фильтрация.", "\x00\x01\u00ad\ue000\ufffd\u200b\t\nriver",
                       "[CLS] x[MASK] [UNK] [PAD][SEP]", "[mask] != [MASK]", "Áé {one}…—‘two’",
+                      "ΟΣ ΟΣΑ Σ σ ς", "\ua9da\ua6fc\u08db\u1734\u2e61", "\U0002b820\U0002b920",
                       "word" * 101, "word " * 600, "emoji 😀🫠🏝️ water", "\U00020000\U0002a700\uf900"])
 
     def test_deterministic_unicode_corpus_against_rust_reference(self):

@@ -1,6 +1,7 @@
 package org.lastphone.app
 
 import android.content.Context
+import android.util.Base64
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -13,11 +14,13 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.io.ByteArrayInputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.UUID
+import java.util.zip.GZIPInputStream
 import com.chaquo.python.Python
 
 /** Actual APK -> WebView -> Chaquopy -> unchanged Lastbook core integration. */
@@ -153,6 +156,48 @@ class EngineIntegrationTest {
             engine.local.stop('test completed')
         """.trimIndent()
         builtins.callAttr("exec", script, scope, scope)
+    }
+
+    @Test fun pythonSemanticEmbedderCrossesJniAndRunsActualOnnx() {
+        // Same valid graph as NativeEmbeddingsTest; the generator is retained in
+        // androidTest/fixtures/make_cls_fixture.py. Its CLS output is
+        // input_ids + attention_mask + 2 * token_type_ids + [3, 4, 0, ...].
+        val graph = "H4sIAAAAAAACA+1VzU7CQBBuKdjtBBDXg2iMgZqYiOHkjRPiVY9euDQLu4SGsq3sNKIn3sEX8Pl8CodW/AmGF7DfZpOdnW/2m9nLxxhv3wmDyTTWqhVqg4t0rjQKDGPdmoRLTBeq974PbahjPFM6wOdEBaE04OBTzCvrUPrOfRqBD16okxSzbJ7gHp2zEuM7N1LCJXzfQF0gkhYpBXNhZtwVUbQuzqk+bGK+N4ligcYv31KrHQ9KGDftN7sE5/CZgrJYhoYztUyEltSR96DNY6rUiyLNr2uojIQh3kFEDwXTUEqayNC0KtPkJ9HmL7rjyHSFFAmqRRcVyULD7dmlwXrsTo3ZeZTJdl6rzKa1chq2v6paVr9vWSvaBQoUKFDgP2GQm8zw4ocf8mM4Yi4/BJdTFsdTYHwvM1QzvNoywt3k3z68gzy6hm2j42dwymze/IMPDlnYoAxWo/YBpTVuNBgIAAA="
+        val modelDirectory = File(root, "derived/models/bge-small-en-v1.5").apply { mkdirs() }
+        val model = File(modelDirectory, "model.onnx")
+        val tokenizer = File(modelDirectory, "tokenizer.json")
+        try {
+            GZIPInputStream(ByteArrayInputStream(Base64.decode(graph, Base64.DEFAULT))).use { input ->
+                model.outputStream().use { input.copyTo(it) }
+            }
+            copy(InstrumentationRegistry.getInstrumentation().context, "bge-tokenizer.json", tokenizer)
+            host.call("open_library", root.absolutePath)
+            val builtins = Python.getInstance().getModule("builtins")
+            val scope = builtins.callAttr("dict")
+            scope.callAttr("__setitem__", "engine", host.engine())
+            val script = """
+                import numpy as np
+                index = engine.server.INDEX
+                assert index.emb is not None, index.status
+                assert index.emb.tok.vocab['[CLS]'] == 101
+                vectors = index.emb.embed(['water', 'Привет, café 中文 and a longer passage', ''])
+                assert vectors.shape == (3, 384), vectors.shape
+                assert vectors.dtype == np.float32, vectors.dtype
+                expected = np.full(384, 102, dtype=np.float32)
+                expected[0] += 3
+                expected[1] += 4
+                expected /= np.linalg.norm(expected)
+                for vector in vectors:
+                    np.testing.assert_allclose(vector, expected, rtol=1e-5, atol=1e-6)
+                np.testing.assert_allclose(np.linalg.norm(vectors, axis=1), np.ones(3), atol=1e-5)
+                assert index.emb.embed([]).shape == (0, 384)
+            """.trimIndent()
+            builtins.callAttr("exec", script, scope, scope)
+        } finally {
+            model.delete()
+            tokenizer.delete()
+            host.call("open_library", root.absolutePath)
+        }
     }
 
     @Test fun untrustedArticleCannotRunScriptsOrReachTheNativeBridge() {

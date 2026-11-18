@@ -7,11 +7,13 @@ import base64
 import importlib
 import json
 import sqlite3
+import socket
 import sys
 import tempfile
 import threading
 import time
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest import mock
 
@@ -28,6 +30,7 @@ class Native:
         self.events = []
         self.cancel_event = threading.Event()
         self.output = "A useful answer [S1]."
+        self.outputs = []
         self.slow = False
         self.template = "<|im_start|>{{ messages }}<|im_end|>"
 
@@ -46,7 +49,8 @@ class Native:
     def llmGenerate(self, request, callback):
         self.cancel_event.clear()
         self.events.append(("generate", json.loads(request)))
-        for piece in self.output:
+        output = self.outputs.pop(0) if self.outputs else self.output
+        for piece in output:
             if self.cancel_event.is_set():
                 return '{"ev":"done","reason":"cancel"}'
             callback.onEvent(json.dumps({"ev": "tok", "t": piece}))
@@ -134,6 +138,7 @@ def library(root, title="Water manual"):
         writer.write(file)
     (lib / "pages/saved.html").write_text('<!doctype html><title>Saved source</title><script>throw 1</script><p>water</p>')
     (lib / "videos/a.mp4").write_bytes(bytes(range(256)) * 1024)
+    (lib / "documents/plain.txt").write_text("A library file that must survive response close.")
     (lib / "collections/test.zim").write_bytes(b"JVM contract fixture")
     (lib / "tools/remote_storage.py").write_text('raise RuntimeError("DATA CODE EXECUTED")')
     (lib / "tools/vendor/never_import.py").write_text('raise RuntimeError("DATA CODE EXECUTED")')
@@ -150,7 +155,7 @@ def library(root, title="Water manual"):
     (lib / "summary.json").write_text('{"resources":3,"pdfs":1,"pdf_pages":2,"web_pages":1,"videos":1}')
     text = "Boil clean water for one minute. This guide explains how to use water for drinking and how to keep the source clean."
     (lib / "text/manual.txt").write_text(text + "\n\f\nSecond page about filters.")
-    with sqlite3.connect(lib / "search.sqlite") as db:
+    with closing(sqlite3.connect(lib / "search.sqlite")) as db:
         db.execute('CREATE VIRTUAL TABLE pages USING fts5(doc_id UNINDEXED,title,collection,category,path UNINDEXED,page UNINDEXED,body,tokenize="unicode61")')
         db.execute("INSERT INTO pages VALUES (?,?,?,?,?,?,?)", ("manual", title, "Test", "test", "documents/manual.pdf", 1, text))
         db.commit()
@@ -281,6 +286,98 @@ class RealEngine(unittest.TestCase):
         self.assertIn([content, False], segments)
         self.assertFalse(any("BAD SOURCE" in text for text, special in segments if special))
         self.assertTrue(any("<|im_start|>" in text for text, special in segments if special))
+
+    def select_model(self, context=8192):
+        model = self.data / "models/custom.gguf"
+        model.parent.mkdir(exist_ok=True)
+        model.write_bytes(b"GGUF-host-contract-only")
+        self.engine.set_model_settings(json.dumps({"path": str(model), "context": context}))
+        self.engine.local.find_thread.join(5)
+        return self.engine.local
+
+    def test_actual_assistant_tool_loop_preserves_citation_validation(self):
+        self.select_model()
+        self.native.outputs = [
+            '<lastphone_tool>{"name":"read_pages","arguments":{"doc_id":"manual","pages":[1]}}</lastphone_tool>',
+            'Boil clean water for one minute [S1]. Unknown source [S999].',
+        ]
+        import assistant
+        events = []
+        assistant.chat([{"role": "user", "content": "How do I purify water?"}], None, events.append, lambda: False)
+        final = next(event for event in events if event["type"] == "done")
+        self.assertTrue(any(event["type"] == "tool" and event["name"] == "read_pages" and event["phase"] == "done" for event in events))
+        self.assertEqual(final["invalid"], ["S999"])
+        self.assertTrue(any(source["doc_id"] == "manual" for source in final["sources"]))
+        self.assertEqual(final["tools"][0]["name"], "read_pages")
+
+    def test_default_context_keeps_all_four_original_text_tools(self):
+        import assistant, llm_local
+        tools = [tool for tool in assistant.TOOLS if tool["function"]["name"] != "view_page"]
+        messages = [{"role": "system", "content": assistant.SYSTEM_TEXT_ONLY}, {"role": "user", "content": "Find water."}]
+        self.assertEqual(len(tools), 4)
+        segments = self.engine.local.render(messages, tools)
+        self.assertLess(llm_local.size_of(segments), 4096 - assistant.ROUND_TOKENS - 64)
+        for name in ("search_library", "read_pages", "get_timed_transcript", "lookup_place"):
+            self.assertIn(name, "".join(text for text, _ in segments))
+
+    def test_library_switch_cancels_generation_before_reloading_globals(self):
+        local = self.select_model()
+        self.native.slow, self.native.output = True, "long answer " * 400
+        status, headers, _ = self.post("/__bridge/stream/start", {"messages": [{"role": "user", "content": "water"}]}, {"Content-Type": "application/octet-stream"})
+        self.assertEqual(status, 200)
+        deadline = time.monotonic() + 5
+        while not local.generating and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertTrue(local.generating)
+        old_runtime = self.engine._runtime
+        second = library(self.folder / "second", "After cancel")
+        self.engine.open_library(str(second))
+        self.assertTrue(local.closed.is_set())
+        self.assertFalse(local.generating)
+        self.assertEqual(old_runtime.active, 0)
+        self.assertIn(b"After cancel", self.get("/api/doc/manual")[2])
+        self.assertFalse(json.loads(self.engine.work_state())["chat"])
+
+    def test_response_lifetime_releases_budget_and_keeps_library_files(self):
+        response = self.engine.request("GET", android.ORIGIN + "/api/topics")
+        budget = self.engine.bridge.lanes["guest"].budget
+        self.assertGreater(budget.used, 0)
+        response.close()
+        response.close()
+        self.assertEqual(budget.used, 0)
+        response = self.engine.request("GET", android.ORIGIN + "/documents/plain.txt")
+        self.assertIsNotNone(response.path)
+        source = Path(response.path)
+        response.close()
+        self.assertTrue(source.is_file())
+
+    def test_lan_sharing_is_explicit_and_keeps_original_auth_handler(self):
+        self.assertIsNone(self.engine._lan)
+        info = json.loads(self.engine.start_lan())
+        self.assertIn("192.168.1.20", info["url"])
+        self.assertGreater(info["port"], 0)
+        self.assertGreater(len(info["key"]), 24)
+        handler = object.__new__(self.engine.server.Handler)
+        handler.client_address = ("192.168.1.30", 40000)
+        handler.path, handler.headers = "/", {}
+        self.assertFalse(handler.lan_ok())
+        handler.headers = {"Cookie": "sg_key=" + info["key"]}
+        self.assertTrue(handler.lan_ok())
+        self.engine.stop_lan()
+        self.assertIsNone(self.engine._lan)
+        self.assertFalse(handler.lan_ok())
+
+    def test_stopping_lan_closes_a_peer_with_an_unfinished_request(self):
+        info = json.loads(self.engine.start_lan())
+        with socket.create_connection(("127.0.0.1", info["port"]), timeout=3) as peer:
+            peer.sendall(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n")
+            runtime = self.engine._runtime
+            with runtime.condition:
+                self.assertTrue(runtime.condition.wait_for(lambda: bool(runtime.lan_sockets), timeout=3))
+            self.engine.stop_lan()
+            with runtime.condition:
+                self.assertTrue(runtime.condition.wait_for(lambda: not runtime.lan_sockets and runtime.active == 0, timeout=3))
+            self.assertEqual(peer.recv(1), b"")
 
     def test_first_run_uses_real_setup_and_native_picker(self):
         self.engine.close()

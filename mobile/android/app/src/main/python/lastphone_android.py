@@ -16,6 +16,7 @@ import time
 import types
 import urllib.parse
 import weakref
+from contextlib import closing
 from pathlib import Path
 
 from lastphone_content import configure_pdf, configure_retrieval, install_modules, native_bytes
@@ -65,6 +66,7 @@ class _Runtime:
         self.stop = threading.Event()
         self.condition = threading.Condition()
         self.active = 0
+        self.lan_sockets = set()
         self.index_thread = None
 
 
@@ -82,15 +84,24 @@ def _close_connections(server):
 def _owned_handler(base, runtime, server):
     class Handler(base):
         def __init__(self, *args, **kwargs):
+            connection = args[0] if args and isinstance(args[0], socket.SocketType) else None
             with runtime.condition:
                 if runtime.stop.is_set():
                     return
                 runtime.active += 1
+                if connection is not None:
+                    # A stalled LAN peer must not prevent the owner from
+                    # stopping sharing or switching their portable library.
+                    connection.settimeout(30)
+                    runtime.lan_sockets.add(connection)
+                runtime.condition.notify_all()
             try:
                 super().__init__(*args, **kwargs)
             finally:
                 _close_connections(server)
                 with runtime.condition:
+                    if connection is not None:
+                        runtime.lan_sockets.discard(connection)
                     runtime.active -= 1
                     runtime.condition.notify_all()
     return Handler
@@ -390,6 +401,25 @@ class Engine:
         lan = self._lan is not None
         return json.dumps({"running": chat or setup or lan, "chat": chat, "setup": setup, "lan": lan})
 
+    def diagnostics(self):
+        """User-requested local diagnostics; never includes bridge or LAN keys."""
+        from engine import update
+        try:
+            capabilities = json.loads(str(self.native.llmCapabilities())) if self.native is not None else {"error": "Native runtime unavailable"}
+        except Exception as error:
+            capabilities = {"error": type(error).__name__}
+        with closing(sqlite3.connect(":memory:")) as db:
+            try:
+                db.execute("CREATE VIRTUAL TABLE fts_probe USING fts5(text)")
+                fts5 = True
+            except sqlite3.OperationalError:
+                fts5 = False
+        return json.dumps({"app": "Lastphone", "version": update.UPDATER.version,
+            "upstream": "9542e80fbdb6e6ee2a0472beabab0bbd706f0c15", "python": sys.version.split()[0],
+            "sqlite": sqlite3.sqlite_version, "fts5": fts5, "data_root": str(self.data),
+            "library_open": self.server is not None, "semantic": dict(self.server.INDEX.status) if self.server else {"state": "off"},
+            "model": self.local.public_settings(), "native": capabilities, "work": json.loads(self.work_state())})
+
     def cancel_work(self):
         self.local.cancel()
         if self.bridge:
@@ -435,6 +465,14 @@ class Engine:
             server, self._lan = self._lan, None
             if server:
                 server.shutdown()
+                with self._runtime.condition:
+                    connections = list(self._runtime.lan_sockets)
+                for connection in connections:
+                    try:
+                        connection.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+                    connection.close()
                 server.server_close()
                 self._lan_thread.join(3)
                 self._lan_thread = None

@@ -95,6 +95,14 @@ class NativeAdaptersTest {
         val second = JSONObject(NativeLlama.generate(request()) { })
         assertEquals(second.toString(), "done", second.getString("ev"))
         assertTrue(second.getInt("n_reused") > 0)
+        // This fixture's BOS is token 1, "<s>". A model-provided template may
+        // already include it, unlike the original Lastbook Gemma renderer.
+        val withBos = JSONObject(request()).put("segments", JSONArray()
+            .put(JSONArray().put("<s>").put(true))
+            .put(JSONArray().put("Once upon a time").put(false)))
+        val templated = JSONObject(NativeLlama.generate(withBos.toString()) { })
+        assertEquals(templated.toString(), "done", templated.getString("ev"))
+        assertEquals("A template BOS must not be added twice.", first.getInt("n_prompt"), templated.getInt("n_prompt"))
     }
 
     @Test fun cancellationStopsNativeDecodeAndTheNextRequestStillWorks() {

@@ -127,6 +127,7 @@ struct Params {
     std::vector<float> split;
     std::vector<llama_model_tensor_buft_override> overrides;
     std::string backend;
+    bool unified_memory = true;
     uint64_t reserve = 768ULL * 1024 * 1024;
 
     explicit Params(const json & options) {
@@ -152,6 +153,7 @@ struct Params {
                 auto device = ggml_backend_dev_get(i);
                 if (gpu_device(device) && std::string(ggml_backend_dev_name(device)).rfind("Vulkan", 0) == 0) {
                     devices.push_back(device);
+                    unified_memory = ggml_backend_dev_type(device) == GGML_BACKEND_DEVICE_TYPE_IGPU;
                     break;
                 }
             }
@@ -189,12 +191,17 @@ json fit(const std::string & path, Params & params) {
                         {"total", row.total}, {"free", row.free}});
     }
     const uint64_t available = available_ram();
-    if (params.backend == "cpu" && available && host + device + params.reserve > available) {
+    // Mobile integrated GPUs share physical RAM with the application. A Vulkan
+    // driver without VK_EXT_memory_budget reports the whole heap as free, so
+    // its own fitter alone cannot protect Android's remaining system memory.
+    const uint64_t required_ram = host + (params.unified_memory ? device : 0) + params.reserve;
+    if (available && required_ram > available) {
         state = COMMON_PARAMS_FIT_STATUS_FAILURE;
     }
     return {{"ev", "fit"}, {"status", state == COMMON_PARAMS_FIT_STATUS_SUCCESS ? "fits" : "does_not_fit"},
             {"backend", params.backend}, {"cpu_only", params.backend == "cpu"}, {"n_gpu_layers", params.model.n_gpu_layers},
             {"n_ctx", params.context.n_ctx}, {"memory", rows}, {"host_bytes", host}, {"device_bytes", device},
+            {"ram_required", required_ram}, {"reserve_bytes", params.reserve}, {"unified_memory", params.unified_memory},
             {"ram_total", total_ram()}, {"ram_free", available_ram()},
             {"fit_ms", std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start).count()}};
 }
@@ -265,7 +272,6 @@ json generate(JNIEnv * env, jobject callback, const json & request, uint64_t epo
     env->DeleteLocalRef(callback_class);
     if (!on_event) throw std::invalid_argument("Callback must implement onEvent(String).");
     std::vector<llama_token> tokens;
-    if (llama_vocab_get_add_bos(e.vocab)) tokens.push_back(llama_vocab_bos(e.vocab));
     const auto start = Clock::now();
     for (const auto & segment : request.at("segments")) {
         if (!segment.is_array() || segment.size() != 2 || !segment[0].is_string() || !segment[1].is_boolean()) {
@@ -273,6 +279,12 @@ json generate(JNIEnv * env, jobject callback, const json & request, uint64_t epo
         }
         auto part = tokenize(e.vocab, segment[0].get<std::string>(), segment[1].get<bool>());
         tokens.insert(tokens.end(), part.begin(), part.end());
+    }
+    // Lastbook's Gemma renderer omits BOS, while some model-owned templates
+    // include it. Add the vocabulary-required token exactly once in either case.
+    if (llama_vocab_get_add_bos(e.vocab)) {
+        const llama_token bos = llama_vocab_bos(e.vocab);
+        if (tokens.empty() || tokens.front() != bos) tokens.insert(tokens.begin(), bos);
     }
     if (tokens.empty()) return failure("bad_request", "The prompt is empty.");
     const int context_size = static_cast<int>(llama_n_ctx(e.context));

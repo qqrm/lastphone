@@ -9,6 +9,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import zipfile
@@ -67,14 +68,16 @@ def main() -> None:
         for index, (name, data) in enumerate(native_files(package)):
             path = Path(temporary) / f"library-{index}.so"
             path.write_bytes(data)
-            tagged_abis = {abi for abi in ARCHITECTURES if abi in name}
-            if len(tagged_abis) != 1:
-                raise ValueError(f"Packaged ELF lacks an unambiguous ABI directory or archive: {name}")
-            abi = tagged_abis.pop()
-            actual_abis.add(abi)
             header = run(readelf, "--file-header", path)
-            if ARCHITECTURES[abi] not in header:
-                report["errors"].append(f"Wrong ELF architecture: {name}")
+            detected_abis = {abi for abi, machine in ARCHITECTURES.items()
+                             if re.search(r"^\s*Machine:\s+" + re.escape(machine) + r"\s*$", header, re.MULTILINE)}
+            if len(detected_abis) != 1:
+                raise ValueError(f"Unsupported ELF architecture: {name}")
+            abi = detected_abis.pop()
+            actual_abis.add(abi)
+            tagged_abis = {tag for tag in ARCHITECTURES if tag in name}
+            if tagged_abis and tagged_abis != {abi}:
+                report["errors"].append(f"ELF architecture does not match its archive or directory: {name}")
             program_headers = run(readelf, "--program-headers", "--wide", path)
             alignments = [int(line.split()[-1], 16) for line in program_headers.splitlines()
                           if line.lstrip().startswith("LOAD ")]

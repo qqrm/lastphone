@@ -17,6 +17,7 @@ The complete GPL text is `mobile/android/LICENSE` and is included in the APK.
 | CPython | 3.13 runtime distributed by Chaquopy | Python Software Foundation license |
 | libkiwix Android | `org.kiwix:libkiwix:2.6.0` | GPL-3.0-or-later; ZIM archives/search and native libzim dependencies |
 | ONNX Runtime Android | `com.microsoft.onnxruntime:onnxruntime-android:1.23.2` | MIT; local BGE inference; telemetry disabled |
+| unicode_categories | Rust crate 0.1.1, tables reproduced in `lastphone_unicode.py` | MIT; Unicode normalization parity with the reference BGE tokenizer; copyright and license included in that module |
 | NumPy | Android wheel 1.26.2 | BSD-3-Clause; original vector index |
 | OpenBLAS / libgfortran | Chaquopy wheel dependencies | OpenBLAS BSD-3-Clause; GCC runtime terms and runtime-library exception |
 | Beautiful Soup | 4.14.3 | MIT; offline saved-page rewriting |

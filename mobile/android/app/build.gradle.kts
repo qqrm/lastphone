@@ -1,8 +1,69 @@
+import org.gradle.api.artifacts.transform.CacheableTransform
+import org.gradle.api.artifacts.transform.InputArtifact
+import org.gradle.api.artifacts.transform.TransformAction
+import org.gradle.api.artifacts.transform.TransformOutputs
+import org.gradle.api.artifacts.transform.TransformParameters
+import org.gradle.api.artifacts.type.ArtifactTypeDefinition
+import org.gradle.api.attributes.Attribute
+import org.gradle.api.file.FileSystemLocation
+import org.gradle.api.provider.Provider
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+import java.util.zip.ZipOutputStream
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.chaquo.python")
 }
+
+/** Keep dependency metadata intact while selecting the NDK's one shared C++ runtime. */
+@CacheableTransform
+abstract class RemoveKiwixCppRuntime : TransformAction<TransformParameters.None> {
+    @get:InputArtifact
+    @get:PathSensitive(PathSensitivity.NAME_ONLY)
+    abstract val inputArtifact: Provider<FileSystemLocation>
+
+    override fun transform(outputs: TransformOutputs) {
+        val input = inputArtifact.get().asFile
+        if (input.name != "libkiwix-2.6.0.aar") {
+            outputs.file(input)
+            return
+        }
+        val removed = mutableSetOf<String>()
+        val runtime = Regex("jni/[^/]+/libc\\+\\+_shared\\.so")
+        val output = outputs.file("libkiwix-2.6.0-ndk-runtime.aar")
+        ZipFile(input).use { source ->
+            ZipOutputStream(output.outputStream().buffered()).use { destination ->
+                source.entries().asSequence().sortedBy { it.name }.forEach { entry ->
+                    if (runtime.matches(entry.name)) {
+                        removed += entry.name
+                    } else {
+                        destination.putNextEntry(ZipEntry(entry.name).apply { time = 0L })
+                        if (!entry.isDirectory) source.getInputStream(entry).use { it.copyTo(destination) }
+                        destination.closeEntry()
+                    }
+                }
+            }
+        }
+        check(removed.containsAll(setOf("jni/arm64-v8a/libc++_shared.so", "jni/x86_64/libc++_shared.so"))) {
+            "The pinned libkiwix AAR no longer has the expected C++ runtime entries: $removed"
+        }
+    }
+}
+
+val ndkCppRuntime = Attribute.of("org.lastphone.ndk-cpp-runtime", Boolean::class.javaObjectType)
+dependencies {
+    attributesSchema { attribute(ndkCppRuntime) }
+    artifactTypes.maybeCreate("aar").attributes.attribute(ndkCppRuntime, false)
+    registerTransform(RemoveKiwixCppRuntime::class) {
+        from.attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, "aar").attribute(ndkCppRuntime, false)
+        to.attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, "aar").attribute(ndkCppRuntime, true)
+    }
+}
+configurations.configureEach { attributes.attribute(ndkCppRuntime, true) }
 
 val upstreamRoot = rootDir.resolve("../..").canonicalFile
 val enginePython = layout.buildDirectory.dir("generated/enginePython")
@@ -61,6 +122,7 @@ android {
         }
     }
     sourceSets["main"].assets.srcDir(engineAssets)
+    sourceSets["androidTest"].assets.srcDir(rootDir.resolve("tests/fixtures"))
     buildFeatures { buildConfig = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

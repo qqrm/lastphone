@@ -55,6 +55,28 @@ class NativeLocal:
             stored = json.loads(self.settings_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             stored = {}
+        if not isinstance(stored, dict):
+            stored = {}
+        for name, lo, hi in (("context", 2048, 131072), ("threads", 1, 32), ("gpu_layers", 0, 999)):
+            value = stored.get(name, DEFAULTS[name])
+            if isinstance(value, bool) or not isinstance(value, int) or not lo <= value <= hi:
+                stored.pop(name, None)
+        for name, allowed in (("mode", ("gguf", "loopback")), ("backend", ("cpu", "vulkan"))):
+            if stored.get(name, DEFAULTS[name]) not in allowed:
+                stored.pop(name, None)
+        for name in ("path", "setup_model", "http_base", "http_model"):
+            if not isinstance(stored.get(name, DEFAULTS[name]), str):
+                stored.pop(name, None)
+        if not isinstance(stored.get("enabled", True), bool):
+            stored.pop("enabled", None)
+        try:
+            from assistant import loopback_base
+            base = loopback_base(stored.get("http_base", DEFAULTS["http_base"]))
+            if not 1 <= urllib.parse.urlsplit(base).port <= 65535:
+                raise ValueError("port")
+            stored["http_base"] = base
+        except (ValueError, TypeError):
+            stored.pop("http_base", None)
         self.settings = {**DEFAULTS, **{k: stored[k] for k in DEFAULTS if k in stored}}
         self.saved = {"enabled": bool(self.settings["enabled"]), "checked": stored.get("checked")}
         self.models = list(models)
@@ -163,7 +185,7 @@ class NativeLocal:
             return {"name": path.stem if path else "Local GGUF", "file": path.name if path else "",
                     "size": size, "state": self.state, "pct": self.pct, "message": self.message,
                     "found_at": path.parent.name if path else None, "enabled": self.enabled(), "runtime": self.native is not None,
-                    "needs_bytes": fit.get("needs", fit.get("needs_bytes")), "ram_total": fit.get("ram_total"),
+                    "needs_bytes": fit.get("ram_required", fit.get("needs", fit.get("needs_bytes"))), "ram_total": fit.get("ram_total"),
                     "placement": (self.ready_info or {}).get("backend", self.settings["backend"]),
                     "load_s": (self.ready_info or {}).get("load_s"), "places": [self.data.name, "models"],
                     "generating": self.generating}
@@ -391,7 +413,10 @@ class NativeLocal:
                 normalized.insert(0, {"role": "system", "content": system})
         markers = {"LASTPHONE_CONTENT_" + secrets.token_hex(20): m["content"] for m in normalized}
         template_messages = [{"role": m["role"], "content": marker} for m, marker in zip(normalized, markers)]
-        rendered = str(self.native.llmRenderChat(json.dumps(template_messages, ensure_ascii=False), True))
+        try:
+            rendered = str(self.native.llmRenderChat(json.dumps(template_messages, ensure_ascii=False), True))
+        except Exception as error:
+            raise RuntimeError("This GGUF chat template is not supported by the native runtime. Choose a published model or a compatible instruct GGUF.") from error
         # Template markup may parse special tokens; every user/source/tool byte
         # is reinserted as a non-special segment after template evaluation.
         if any(rendered.count(marker) != 1 for marker in markers):
