@@ -248,6 +248,18 @@ class RealEngine(unittest.TestCase):
         self.assertIn(b"ZIM article", self.get("/zim/test.zim/A/home")[2])
         self.assertIn(b"Offline encyclopedia", self.get("/api/collection-search?q=water")[2])
 
+    def test_document_ticket_is_a_void_command_and_stays_single_use(self):
+        from app import bridge
+        path = "/pages/saved.html"
+        # Exercise the original flood gate with a small deterministic fixture.
+        with mock.patch.object(bridge, "BIG_BODY", 1):
+            self.assertEqual(self.get(path)[0], 403)
+            self.assertIsNone(self.engine.grant_navigation(android.ORIGIN + path + "#section"))
+            self.assertEqual(self.get(path)[0], 200)
+            self.assertEqual(self.get(path)[0], 403)
+            self.engine.grant_navigation("https://attacker.invalid" + path)
+            self.assertEqual(self.get(path)[0], 403)
+
     def test_open_library_replaces_catalog_cache_and_request_key(self):
         self.assertIn(b"Water manual", self.get("/api/doc/manual")[2])
         key = self.engine.bridge.key

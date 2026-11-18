@@ -244,6 +244,19 @@ class EngineIntegrationTest {
         }
     }
 
+    @Test fun pythonVoidCommandStopsLanWithoutNullReturnFailure() {
+        // This is the real Chaquopy mapping, not a Kotlin mock of Python None.
+        assertNull(host.engine().callAttr("stop_lan"))
+        try {
+            val info = JSONObject(host.call("start_lan").toString())
+            assertTrue(info.getInt("port") > 0)
+            assertTrue(JSONObject(host.call("work_state").toString()).getBoolean("lan"))
+            host.callVoid("stop_lan")
+            assertFalse(JSONObject(host.call("work_state").toString()).getBoolean("lan"))
+            host.callVoid("stop_lan") // An already stopped command still returns None.
+        } finally { host.engine().callAttr("stop_lan") }
+    }
+
     @Test fun untrustedArticleCannotRunScriptsOrReachTheNativeBridge() {
         host.request("GET", EngineHost.ORIGIN + "/pages/fixture.html").use { response ->
             assertEquals(200, response.status)

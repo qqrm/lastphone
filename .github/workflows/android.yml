@@ -160,6 +160,10 @@ jobs:
           arch: x86_64
           cores: 2
           ram-size: 3072M
+          # Use the supported Mesa/ANGLE renderer. Two legacy SwiftShader GLES
+          # runs lost the host emulator when opening WebView video, without OOM.
+          # Lavapipe still exposes Vulkan, so native GPU inference remains tested.
+          emulator-options: -no-window -gpu lavapipe -no-snapshot -noaudio -no-boot-anim
           disable-linux-hw-accel: false
           emulator-boot-timeout: 600
           working-directory: mobile/android

@@ -201,7 +201,7 @@ class MainActivity : ComponentActivity() {
                 "navigate" -> { navigateInside(data.optString("url")); reply(proxy, JSONObject().put("id", id).put("ok", true)) }
                 "ticket" -> host.worker.execute {
                     try {
-                        host.call("grant_navigation", data.getString("url"))
+                        host.callVoid("grant_navigation", data.getString("url"))
                         reply(proxy, JSONObject().put("id", id).put("ok", true))
                     } catch (_: Throwable) { reply(proxy, JSONObject().put("id", id).put("error", "Cannot open this document")) }
                 }
@@ -429,7 +429,7 @@ class MainActivity : ComponentActivity() {
                         runOnUiThread { AlertDialog.Builder(this).setTitle("Library sharing").setMessage(info).setPositiveButton("Close", null).show() }
                     } catch (error: Throwable) { runOnUiThread { showError("Cannot start sharing", error) } }
                 }
-            }.setNeutralButton("Stop sharing") { _, _ -> host.worker.execute { host.call("stop_lan") } }
+            }.setNeutralButton("Stop sharing") { _, _ -> host.worker.execute { host.callVoid("stop_lan") } }
             .setNegativeButton("Cancel", null).show()
     }
     private fun startWork(dataSync: Boolean = false) {

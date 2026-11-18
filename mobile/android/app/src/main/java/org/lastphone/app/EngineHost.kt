@@ -79,6 +79,8 @@ class EngineHost(private val context: Context) {
 
     fun engine(): PyObject = start().get(180, TimeUnit.SECONDS)
     fun call(name: String, vararg args: Any?): PyObject = engine().callAttr(name, *args)
+    /** Chaquopy returns Java null for Python None: commands have no result to assert non-null. */
+    fun callVoid(name: String, vararg args: Any?) { engine().callAttr(name, *args) }
     /** A Stop action must not queue behind eight long-poll requests or imports. */
     fun cancelWork() {
         transfers.cancel()

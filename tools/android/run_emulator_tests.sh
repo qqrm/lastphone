@@ -51,6 +51,22 @@ collect_logs() {
     record_host_state
     record_device_state
     timeout 5s sudo -n dmesg --ctime > "$REPORTS/host-kernel.txt" 2>&1
+    timeout 5s sudo -n journalctl --no-pager --since '-10 minutes' \
+        _COMM=systemd-coredump > "$REPORTS/host-coredumps.txt" 2>&1
+    # The emulator catches signals itself, so a host crash may leave no kernel
+    # segfault line. Decode its own minidumps to text, without uploading memory.
+    local crashreport="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}/emulator/crashreport"
+    local dump count=0
+    if [[ -x "$crashreport" ]]; then
+        timeout 5s "$crashreport" -l > "$REPORTS/emulator-crash-list.txt" 2>&1
+        for dump in /tmp/android-"$(id -un)"/emu-crash-*.db/{pending,completed}/*.dmp; do
+            [[ -f "$dump" ]] || continue
+            timeout 15s "$crashreport" -d "$dump" \
+                > "$REPORTS/emulator-crash-$(basename "$dump").txt" 2>&1
+            count=$((count + 1))
+            (( count >= 3 )) && break
+        done
+    fi
     local device_state
     device_state="$(timeout 3s adb get-state 2>/dev/null)"
     if [[ "$device_state" == device ]]; then
