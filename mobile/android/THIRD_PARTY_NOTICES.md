@@ -15,7 +15,7 @@ The complete GPL text is `mobile/android/LICENSE` and is included in the APK.
 | SPIRV-Headers | KhronosGroup/SPIRV-Headers `09913f088a1197aba4aefd300a876b2ebbaa3391` | MIT; shader headers |
 | Chaquopy | `com.chaquo.python:17.2.0` | MIT; embedded CPython and Java bridge |
 | CPython | 3.13 runtime distributed by Chaquopy | Python Software Foundation license |
-| libkiwix Android | `org.kiwix:libkiwix:2.6.0` | GPL-3.0-or-later; ZIM archives/search and native libzim dependencies |
+| libkiwix Android | `org.kiwix:libkiwix:2.6.0`; java-libkiwix tag `2.6.0`, commit `ff2919fd10d5ff2c69158925dd89ccb251546f8e` | GPL-3.0-or-later; ZIM archives/search and native libzim dependencies |
 | ONNX Runtime Android | `com.microsoft.onnxruntime:onnxruntime-android:1.23.2` | MIT; local BGE inference; telemetry disabled |
 | unicode_categories | Rust crate 0.1.1, tables reproduced in `lastphone_unicode.py` | MIT; Unicode normalization parity with the reference BGE tokenizer; copyright and license included in that module |
 | NumPy | Android wheel 1.26.2 | BSD-3-Clause; original vector index |
@@ -28,7 +28,7 @@ The complete GPL text is `mobile/android/LICENSE` and is included in the APK.
 Native source is retrieved from pinned public repositories by
 `mobile/ipad/scripts/prepare_dependencies.sh` and CMake. Application source,
 Android adaptations, build scripts and pins are in this repository. libkiwix
-source/build recipes are at https://github.com/kiwix/android-libkiwix and
+source/build recipes are at https://github.com/kiwix/java-libkiwix and
 https://github.com/kiwix/libkiwix; libzim is at https://github.com/openzim/libzim.
 Use source releases matching the published 2.6.0 Android AAR.
 

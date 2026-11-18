@@ -92,6 +92,9 @@ jobs:
       - name: Verify Python engine adapter
         run: python3 -B -m unittest discover -s mobile/android/tests -v
 
+      - name: Verify asynchronous web route lifecycles
+        run: node --test app/tests/route_lifecycle_test.mjs
+
       - name: Restore pinned native build cache
         id: native-cache
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
@@ -156,7 +159,7 @@ jobs:
           target: google_apis
           arch: x86_64
           cores: 2
-          ram-size: 4096M
+          ram-size: 3072M
           disable-linux-hw-accel: false
           emulator-boot-timeout: 600
           working-directory: mobile/android

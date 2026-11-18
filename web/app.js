@@ -249,7 +249,9 @@ function parse() {
 // The sidebar row each page belongs to. Reading pages stay under Library, articles under Encyclopedias; search results select no row.
 const NAV_OF = { '': 'videos', guides: 'guides', t: 'guides', ask: 'ask', videos: 'videos', watch: 'videos', map: 'map', library: 'library', learn: 'library', browse: 'library', shelf: 'library', collection: 'library', read: 'library', wiki: 'encyclopedias', search: '', saved: 'saved', encyclopedias: 'encyclopedias', prepare: 'prepare', about: 'about' };
 let leaving = null;  // cleanup hook for the current view (player, chat stream…)
+let routeGeneration = 0;
 async function route() {
+  const generation = ++routeGeneration;
   const cameFromSide = !!(document.activeElement && document.activeElement.closest && document.activeElement.closest('.side,.tabbar'));
   const { parts, q } = parse();
   const h = here();
@@ -280,6 +282,7 @@ async function route() {
   try {
     if (v !== 'map') MapView.stop();
     await topics().catch(() => { });
+    if (generation !== routeGeneration) return;
     if (!v || v === 'guides') await home();
     else if (v === 't') await topicPage(parts[1], parts[2]);
     else if (v === 'ask') await Chat.page(main, parts.slice(1), q);
@@ -297,7 +300,11 @@ async function route() {
     else if (v === 'collection') await collectionPage(q.get('name') || '', q.get('from'));
     else if (v === 'about') await about();
     else notFound();
-  } catch (e) { setTitle(''); document.body.className = 'v-error'; main.innerHTML = emptyState('warn', 'This page could not be opened', e.message || e) }   // v-error: not a reading page, so a phone keeps its tab bar
+  } catch (e) {
+    if (generation !== routeGeneration) return;  // A late answer from the previous page must not replace the new one.
+    setTitle(''); document.body.className = 'v-error'; main.innerHTML = emptyState('warn', 'This page could not be opened', e.message || e)
+  }   // v-error: not a reading page, so a phone keeps its tab bar
+  if (generation !== routeGeneration) return;
   wireRails(); dock(); barState();
   $('#topQ').value = '';
   const big = $('main h1'); if (big) h1seen.observe(big);
@@ -529,10 +536,12 @@ async function videosHome() {
     <div class="chips" style="margin-top:8px">${[['short', 'Under 10 min'], ['medium', '10–30 min'], ['long', 'Over 30 min']].map(([k, l]) => `<a class="chip" href="#/videos/all?len=${k}">${ico('clock')}${l}</a>`).join('')}</div>
     <div id="vrows"><p class="loading">Loading videos…</p></div>`;
   $('#vqF').addEventListener('submit', e => { e.preventDefault(); location.hash = '#/videos/all?q=' + encodeURIComponent($('#vq').value.trim()) });
+  const rowsElement = $('#vrows');
   const rows = await api('/api/videos');
   const cont = (await resumable(20)).slice(0, 12);
+  if (!rowsElement.isConnected) return;   // Startup can finish after a reader has already opened.
   const GCOL = { health: 'hurt', water: 'water', food: 'food', power: 'power', outdoors: 'shelter', repair: 'repair', making: 'land' };
-  $('#vrows').innerHTML =
+  rowsElement.innerHTML =
     (cont.length ? secHead('Continue watching') + rail(cont.map(([id, v]) => vcard({ id, title: v.title, thumb: v.thumb, duration: v.d }, { sub: 'Resume at ' + clock(v.t) })).join('')) : '') +
     rows.map(r => secHead(esc(r.title), r.note ? esc(r.note) : '', `<a href="#/videos/${r.id}">See all ${r.count}</a>`) +
       rail(r.items.map(v => vcard(v, { style: tcStyle(v.guide || GCOL[r.id]) })).join(''))).join('') +
@@ -602,7 +611,9 @@ async function videoFormats(url) {
 }
 
 async function watch(id, t, from) {
+  const generation = routeGeneration;
   const d = await api('/api/doc/' + encodeURIComponent(id));
+  if (generation !== routeGeneration) return;
   setTitle(d.title);
   const selfHref = `#/watch/${encodeURIComponent(id)}`;
   remember({ key: 'v:' + id, title: d.title, href: selfHref, sub: 'Video · ' + fmtDur(d.duration) });
@@ -658,8 +669,10 @@ async function watch(id, t, from) {
   let cues = [];
   try {
     const tx = await api('/api/transcript/' + encodeURIComponent(id)); cues = tx.cues || [];
+    if (!vid.isConnected) return;
     $('#txnote').textContent = cues.length ? `${tx.source === 'authored' ? 'Captions written by the publisher' : /auto/.test(tx.source || '') ? 'Automatic captions' : 'Captions'} — may contain errors.` : '';
   } catch { }
+  if (!vid.isConnected) return;
   const box = $('#cues');
   const draw = q => {
     const rx = q ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig') : null;
@@ -678,13 +691,16 @@ async function watch(id, t, from) {
   });
   try {
     const rel = await api('/api/videos/related/' + encodeURIComponent(id));
+    if (!vid.isConnected) return;
     if (rel.length && $('#morev')) { $('#morev').innerHTML = secHead('More like this') + rail(rel.map(v => vcard(v)).join('')); wireRails($('#morev')) }
   } catch { }
 }
 
 /* ------------------------------------------------------------- reader -- */
 async function reader(id, page, from, view) {
+  const generation = routeGeneration;
   const d = await api('/api/doc/' + encodeURIComponent(id));
+  if (generation !== routeGeneration) return;
   if (d.kind === 'video') { swap('#/watch/' + encodeURIComponent(id) + (from ? '?from=' + encodeURIComponent(from) : '')); return }
   if (d.kind === 'transcript' && d.videoId) { swap('#/watch/' + encodeURIComponent(d.videoId) + (from ? '?from=' + encodeURIComponent(from) : '')); return }
   setTitle(d.title, [d.publisher, d.year, d.trust].filter(Boolean).join(' · '));
@@ -731,15 +747,18 @@ async function reader(id, page, from, view) {
     wrap.addEventListener('touchend', e => { if (sx == null) return; const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy; sx = null; if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.5) { if (dx < 0 && page < total) location.hash = go(page + 1); if (dx > 0 && page > 1) location.hash = go(page - 1) } }, { passive: true });
   } else if (view === 'pdf') {
     await authorizeFrame(fileUrl(d.path));
+    if (!body.isConnected) return;
     body.innerHTML = `<iframe class="frame" title="${esc(d.title)}" src="${fileUrl(d.path)}#page=${page}"></iframe><p class="small muted">If the PDF doesn’t show here (some phones can’t), use Page view or open the original file.</p>`;
   } else if (view === 'web') {
     await authorizeFrame(fileUrl(d.path));
+    if (!body.isConnected) return;
     const own = /(^|\/)documents\/lastbook\//.test(d.path);   // Lastbook's own pages (Sources and permissions) take the window's look from the server (engine/saved_pages.py, OWN_LOOK); an older server's stays a white sheet
     body.innerHTML = `<iframe class="frame${own ? ' own' : ''}" title="${esc(d.title)}" src="${fileUrl(d.path)}"></iframe>`;
   } else {
     body.innerHTML = '<p class="loading">Loading text…</p>';
     try {
       const t = await api(`/api/page/${encodeURIComponent(id)}/${isPdf ? page : 1}`);
+      if (!body.isConnected) return;
       const txt = (t.text || '').replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
       body.innerHTML = `${isPdf || isWeb ? '<div class="notice small">Text pulled out of the original automatically — tables, diagrams and warning boxes can be lost or out of order. Check the Page view for anything important.</div>' : ''}<div class="pagetext">${esc(txt) || '<span class="muted">No text on this page (it may be a picture or blank).</span>'}</div>`;
     } catch (e) { body.innerHTML = errorBox(e, 'Couldn’t load the text.') }
@@ -751,6 +770,7 @@ async function reader(id, page, from, view) {
 const ZIMNAMES = { mdwiki: 'Medical encyclopedia (MDWiki)', wikipedia: 'Wikipedia (text only)', wikibooks: 'Wikibooks — how-to textbooks', appropedia: 'Appropedia — appropriate technology' };
 const zimLabel = name => { for (const k in ZIMNAMES) if (name.startsWith(k)) return ZIMNAMES[k]; return name };
 async function wiki(path, from, y) {
+  const generation = routeGeneration;
   const [zim, ...rest] = path.split('/');
   const art = rest.join('/');
   const title = decodeURIComponent(art.split('/').pop() || '').replace(/_/g, ' ') || zimLabel(zim);
@@ -759,6 +779,7 @@ async function wiki(path, from, y) {
   const selfHref = '#/wiki/' + path;
   const mainPage = zimMain(zim);
   await authorizeFrame(src);
+  if (generation !== routeGeneration) return;
   main.innerHTML = `<div class="rtop">${backButton(from || '#/encyclopedias')}<span id="wsave" class="dock">${saveButton({ key: 'w:' + path, title, href: selfHref, sub: zimLabel(zim) })}</span></div>
     <h1 class="rtitle" id="wtitle">${esc(title)}</h1><div class="rsrc"><span class="zn">${esc(zimLabel(zim))} · </span>Community-written; check safety-critical steps against a manual${IN_WINDOW ? '' : ` · <a id="wopen" href="${src}" target="_blank" rel="noopener">open on its own</a>`}</div>
     <iframe class="frame" id="wframe" title="${esc(title)}" src="${src}"></iframe>`;
