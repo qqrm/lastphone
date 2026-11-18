@@ -12,7 +12,7 @@ variant exists for emulator testing.
 
 ## Build on Linux or WSL2
 
-Use Python 3.13, Git, a host C/C++ compiler and FFmpeg. On Debian/Ubuntu the host
+Use Python 3.13, Git and a host C/C++ compiler. On Debian/Ubuntu the host
 packages are `python3.13`, `python3.13-venv`, `git` and `build-essential`.
 The synthetic media fixture is checked into Git with a SHA-256 pin; ffmpeg is
 needed only when deliberately regenerating it.
@@ -103,6 +103,7 @@ python -B -m unittest \
   app.tests.test_address_search app.tests.test_topic_search app.tests.test_chat_steps \
   app.tests.test_chat_tables app.tests.test_validate_topics app.tests.test_libq
 python -B -m unittest discover -s mobile/android/tests -v
+node --test app/tests/route_lifecycle_test.mjs app/tests/android_branding_test.mjs
 ```
 
 The setup tests exercise disk-space recommendations. Set `TMPDIR` to a filesystem
@@ -127,8 +128,10 @@ bash ../../tools/android/run_emulator_tests.sh
 
 The script requires a 4 KB page-size x86_64 image, runs real instrumentation and
 enables airplane mode with Wi-Fi and mobile data disabled before starting the app.
-It retains per-test screenshots, a final UI dump, device properties, memory information and logcat in
-`app/build/reports/emulator`. Use at least 4 GB emulator RAM. Tests exercise actual
+It retains per-test screenshots, a final UI dump, device properties, host and guest
+memory snapshots, and continuous logcat in `app/build/reports/emulator`.
+CI uses 3 GB emulator RAM and a 1536 MB Gradle heap during instrumentation;
+allow additional host RAM for the emulator process and Android graphics. Tests exercise actual
 JNI GGUF inference, cancellation/reuse, PDF rendering, ZIM reading/search, ONNX
 execution, the embedded Python engine, web transport and Android lifecycle.
 Vulkan inference is exercised when the emulator exposes a Vulkan backend; the
@@ -184,7 +187,7 @@ the debug key is never substituted for a production key.
 
 ## Remaining device acceptance
 
-The original regression suite passed 335 tests with four platform/fixture skips,
+The original regression suite ran 335 tests: 331 passed and four platform/fixture tests were skipped,
 and the Android host adapter suite passed 22 tests under standard Python 3.13 on
 2026-11-18. Both ABI builds, their three JVM unit tests and package audits have
 also passed locally. Build, package and instrumentation status

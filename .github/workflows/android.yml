@@ -92,8 +92,8 @@ jobs:
       - name: Verify Python engine adapter
         run: python3 -B -m unittest discover -s mobile/android/tests -v
 
-      - name: Verify asynchronous web route lifecycles
-        run: node --test app/tests/route_lifecycle_test.mjs
+      - name: Verify web route lifecycles and Android branding
+        run: node --test app/tests/route_lifecycle_test.mjs app/tests/android_branding_test.mjs
 
       - name: Restore pinned native build cache
         id: native-cache

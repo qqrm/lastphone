@@ -222,7 +222,7 @@ function errorBox(e, what) {
 }
 // The window title, and on reading pages the toolbar's title and the line under it.
 // bar: what the toolbar shows when it is not the page's own title (an article names itself; the toolbar names the encyclopedia).
-const setTitle = (t, sub, bar) => { document.title = t ? t + ' · Lastbook' : 'Lastbook'; const b = $('#tbTitle'); b.textContent = b.title = bar ?? t ?? ''; if (sub !== undefined) $('#tbSub').textContent = $('#tbSub').title = sub };
+const setTitle = (t, sub, bar) => { const appName = window.LastphoneShell?.appName || 'Lastbook'; document.title = t ? t + ' · ' + appName : appName; const b = $('#tbTitle'); b.textContent = b.title = bar ?? t ?? ''; if (sub !== undefined) $('#tbSub').textContent = $('#tbSub').title = sub };
 
 /* ------------------------------------------------------------- router -- */
 // Where this tab is in its history. Each entry carries its own index in history.state, so Back and Forward are known exactly:

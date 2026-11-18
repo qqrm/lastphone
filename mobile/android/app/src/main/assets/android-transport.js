@@ -30,7 +30,7 @@
     try { channel.postMessage(JSON.stringify({ ...data, id })) }
     catch (error) { clearTimeout(timer); pending.delete(id); reject(error) }
   });
-  window.LastphoneShell = Object.freeze({ authorizeFrame: path => send({ action: 'ticket', url: new URL(path, location.href).href }) });
+  window.LastphoneShell = Object.freeze({ appName: 'Lastphone', authorizeFrame: path => send({ action: 'ticket', url: new URL(path, location.href).href }) });
   window.fetch = async (input, init) => {
     const request = new Request(input, init), url = new URL(request.url);
     if (url.origin !== location.origin) throw new TypeError('Lastphone blocks web requests from library pages.');
@@ -58,8 +58,24 @@
     }).catch(error => alert(error.message));
   }, true);
   // Programmatic anchor.click() is also caught above, including the original chat exporter.
-  document.addEventListener('DOMContentLoaded', () => {
-    document.title = document.title.replaceAll('Lastbook', 'Lastphone');
-    document.querySelectorAll('.side-brand span,.brand span,.capband span').forEach(el => { if (el.textContent === 'Lastbook') el.textContent = 'Lastphone' });
-  });
+  const brandTitle = () => {
+    // Rename the shell suffix, preserving "Lastbook" inside a source's title.
+    const title = document.title;
+    const branded = title === 'Lastbook' ? 'Lastphone' : title === 'Set up Lastbook' ? 'Set up Lastphone'
+      : title.endsWith(' · Lastbook') ? title.slice(0, -'Lastbook'.length) + 'Lastphone' : title;
+    if (branded !== title) document.title = branded;
+  };
+  const brandShell = () => {
+    brandTitle();
+    document.querySelectorAll('.side-brand span,.brand span,.capband span,.s-brand > span').forEach(el => { if (el.textContent === 'Lastbook') el.textContent = 'Lastphone' });
+    document.querySelectorAll('.brand[aria-label],.side-brand[aria-label]').forEach(el => {
+      const label = el.getAttribute('aria-label'), branded = label.replace(/^Lastbook\b/, 'Lastphone');
+      if (branded !== label) el.setAttribute('aria-label', branded);
+    });
+    // Chat also sets document.title directly after a turn is renamed. Observe
+    // only the head; article text and original source attribution stay intact.
+    new MutationObserver(brandTitle).observe(document.head, { childList: true, subtree: true, characterData: true });
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', brandShell, { once: true });
+  else brandShell();
 })();
