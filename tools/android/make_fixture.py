@@ -5,16 +5,17 @@ No copyrighted books, models, or personal coordinates are included. The map is a
 the equator/prime meridian and all source texts explicitly say they are test data.
 """
 import argparse
+import hashlib
 import json
-import shutil
 import sqlite3
 import struct
-import subprocess
 import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT = ROOT / "mobile/android/app/src/androidTest/assets/library"
+VIDEO = ROOT / "tools/android/fixtures/video.mp4"
+VIDEO_SHA256 = "8cb821427b3047f97141c032d2a0eb8a417f9f3a8593e268d979c5b3b51df097"
 
 
 def pdf(text: str) -> bytes:
@@ -47,9 +48,10 @@ def make(destination: Path):
         '<script>parent.__untrustedExecuted=true</script><img src="https://example.invalid/tracker.png">', encoding="utf-8")
     (lib / "text/fixture-html.txt").write_text("Тестовый документ: вода, поход и автономная библиотека.", encoding="utf-8")
     (lib / "transcripts/fixture.vtt").write_text("WEBVTT\n\n00:00:00.000 --> 00:00:02.000\nOffline video fixture\n\n00:00:12.000 --> 00:00:14.000\nSecond caption for seeking\n", encoding="utf-8")
-    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=darkgreen:s=160x90:r=10",
-                    "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100", "-t", "14", "-c:v", "libx264", "-pix_fmt", "yuv420p",
-                    "-c:a", "aac", "-movflags", "+faststart", "-metadata", "title=Lastphone synthetic fixture", str(lib / "videos/fixture.mp4")], check=True)
+    video = VIDEO.read_bytes()
+    if hashlib.sha256(video).hexdigest() != VIDEO_SHA256:
+        raise ValueError("The pinned synthetic video fixture is corrupted")
+    (lib / "videos/fixture.mp4").write_bytes(video)
     records = [
         {"id": "fixture-pdf", "kind": "pdf", "path": "documents/fixture.pdf", "title": "Water test manual", "pages": 1},
         {"id": "fixture-html", "kind": "html", "path": "pages/fixture.html", "title": "Вода: тестовый документ"},

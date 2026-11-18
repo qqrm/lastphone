@@ -73,11 +73,6 @@ jobs:
           sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;29.0.14206865' 'cmake;3.22.1'
           echo "$ANDROID_HOME/cmake/3.22.1/bin" >> "$GITHUB_PATH"
 
-      - name: Install media fixture encoder
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y ffmpeg
-
       - name: Set up Gradle cache and validate wrapper
         uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
         with:

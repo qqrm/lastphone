@@ -13,7 +13,9 @@ variant exists for emulator testing.
 ## Build on Linux or WSL2
 
 Use Python 3.13, Git, a host C/C++ compiler and FFmpeg. On Debian/Ubuntu the host
-packages are `python3.13`, `python3.13-venv`, `git`, `build-essential` and `ffmpeg`.
+packages are `python3.13`, `python3.13-venv`, `git` and `build-essential`.
+The synthetic media fixture is checked into Git with a SHA-256 pin; ffmpeg is
+needed only when deliberately regenerating it.
 The bootstrap installs the Android SDK/NDK and JDK in a user-owned directory; it
 does not install system packages. On other development hosts, install the same
 versions through Android Studio and provide `JAVA_HOME` and `ANDROID_HOME`.
