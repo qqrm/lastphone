@@ -5,7 +5,9 @@ const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fileUrl = p => '/' + String(p || '').split('/').map(encodeURIComponent).join('/');
 const main = $('#main');
-const IN_WINDOW = location.protocol === 'lastbook:' || location.hostname === 'lastbook.invalid';   // the desktop app, not a browser over the server
+const IN_WINDOW = location.protocol === 'lastbook:' || ['lastbook.invalid', 'lastphone.invalid'].includes(location.hostname);
+// Android authorizes a top-frame initiated large document before its iframe starts loading.
+const authorizeFrame = url => window.LastphoneShell ? window.LastphoneShell.authorizeFrame(url) : Promise.resolve();
 if (IN_WINDOW) $('#sideSettings').hidden = false;   // Library and local AI (web/setup.html) is in the desktop app only
 
 /* ---------------------------------------------------------------- icons -- */
@@ -728,8 +730,10 @@ async function reader(id, page, from, view) {
     wrap.addEventListener('touchstart', e => { if (e.touches.length === 1) { sx = e.touches[0].clientX; sy = e.touches[0].clientY } }, { passive: true });
     wrap.addEventListener('touchend', e => { if (sx == null) return; const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy; sx = null; if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.5) { if (dx < 0 && page < total) location.hash = go(page + 1); if (dx > 0 && page > 1) location.hash = go(page - 1) } }, { passive: true });
   } else if (view === 'pdf') {
+    await authorizeFrame(fileUrl(d.path));
     body.innerHTML = `<iframe class="frame" title="${esc(d.title)}" src="${fileUrl(d.path)}#page=${page}"></iframe><p class="small muted">If the PDF doesn’t show here (some phones can’t), use Page view or open the original file.</p>`;
   } else if (view === 'web') {
+    await authorizeFrame(fileUrl(d.path));
     const own = /(^|\/)documents\/lastbook\//.test(d.path);   // Lastbook's own pages (Sources and permissions) take the window's look from the server (engine/saved_pages.py, OWN_LOOK); an older server's stays a white sheet
     body.innerHTML = `<iframe class="frame${own ? ' own' : ''}" title="${esc(d.title)}" src="${fileUrl(d.path)}"></iframe>`;
   } else {
@@ -754,6 +758,7 @@ async function wiki(path, from, y) {
   const src = '/zim/' + encodeURIComponent(zim) + '/' + art.split('/').map(encodeURIComponent).join('/');
   const selfHref = '#/wiki/' + path;
   const mainPage = zimMain(zim);
+  await authorizeFrame(src);
   main.innerHTML = `<div class="rtop">${backButton(from || '#/encyclopedias')}<span id="wsave" class="dock">${saveButton({ key: 'w:' + path, title, href: selfHref, sub: zimLabel(zim) })}</span></div>
     <h1 class="rtitle" id="wtitle">${esc(title)}</h1><div class="rsrc"><span class="zn">${esc(zimLabel(zim))} · </span>Community-written; check safety-critical steps against a manual${IN_WINDOW ? '' : ` · <a id="wopen" href="${src}" target="_blank" rel="noopener">open on its own</a>`}</div>
     <iframe class="frame" id="wframe" title="${esc(title)}" src="${src}"></iframe>`;
