@@ -19,3 +19,6 @@ build/
 *.dmg
 *.exe
 *.zip
+# Local hardware diagnostics can contain device identifiers and library metadata.
+/lastphone-nubia-*/
+/results-*/

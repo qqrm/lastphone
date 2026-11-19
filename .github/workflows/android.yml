@@ -92,6 +92,9 @@ jobs:
       - name: Verify Python engine adapter
         run: python3 -B -m unittest discover -s mobile/android/tests -v
 
+      - name: Verify physical-device runner failure handling
+        run: python3 -B -m unittest discover -s tools/android/tests -v
+
       - name: Verify web route lifecycles and Android branding
         run: node --test app/tests/route_lifecycle_test.mjs app/tests/android_branding_test.mjs
 
@@ -106,6 +109,7 @@ jobs:
           key: ${{ runner.os }}-lastphone-native-v1-${{ hashFiles('tools/android/toolchain.lock.json', 'mobile/android/app/build.gradle.kts', 'mobile/android/app/src/main/cpp/CMakeLists.txt', 'mobile/android/app/src/main/cpp/cmake/**') }}-${{ hashFiles('mobile/android/app/src/main/cpp/llama_jni.cpp') }}
           restore-keys: |
             ${{ runner.os }}-lastphone-native-v1-${{ hashFiles('tools/android/toolchain.lock.json', 'mobile/android/app/build.gradle.kts', 'mobile/android/app/src/main/cpp/CMakeLists.txt', 'mobile/android/app/src/main/cpp/cmake/**') }}-
+            ${{ runner.os }}-lastphone-native-v1-
 
       - name: Prepare pinned native sources
         run: bash mobile/ipad/scripts/prepare_dependencies.sh
@@ -121,7 +125,9 @@ jobs:
         run: >-
           ./gradlew --no-daemon --max-workers=2
           assemblePhoneDebug assembleEmulatorDebug assembleEmulatorDebugAndroidTest
-          lintPhoneDebug lintEmulatorDebug testPhoneDebugUnitTest testEmulatorDebugUnitTest
+          assembleHardwareDebug assembleHardwareDebugAndroidTest
+          lintPhoneDebug lintEmulatorDebug lintHardwareDebug
+          testPhoneDebugUnitTest testEmulatorDebugUnitTest testHardwareDebugUnitTest
 
       - name: Preserve native compilation for follow-up fixes
         if: always() && !cancelled() && github.event_name != 'pull_request' && steps.native-cache.outputs.cache-hit != 'true'
@@ -180,6 +186,19 @@ jobs:
           path: |
             mobile/android/app/build/outputs/apk/phone/debug/app-phone-debug.apk
             mobile/android/app/build/outputs/apk/phone/debug/app-phone-debug.apk.sha256
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      - name: Package isolated physical-device test kit
+        # Packaging and emulator success do not mark physical acceptance passed.
+        run: python3 tools/android/package_hardware_kit.py
+
+      - name: Upload Nubia hardware test kit
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: lastphone-nubia-hardware-kit
+          path: dist/lastphone-nubia-hardware-kit.zip
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
