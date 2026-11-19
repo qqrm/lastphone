@@ -120,6 +120,14 @@ android {
             dimension = "device"
             ndk { abiFilters += "x86_64" }
         }
+        // Physical acceptance must not replace the user's alpha installation or
+        // point the integration fixtures at its real library and preferences.
+        create("hardware") {
+            dimension = "device"
+            applicationIdSuffix = ".hardwaretest"
+            versionNameSuffix = "-hardware-test"
+            ndk { abiFilters += "arm64-v8a" }
+        }
     }
     sourceSets["main"].assets.srcDir(engineAssets)
     sourceSets["androidTest"].assets.srcDir(rootDir.resolve("tests/fixtures"))
@@ -158,6 +166,10 @@ chaquopy {
         pip {
             install("beautifulsoup4==4.14.3")
             install("pypdf==6.7.5")
+            // Match the alpha.1 dependency resolution for hardware comparison.
+            // Unbounded transitives changed between the emulator and device builds.
+            install("soupsieve==4.1.1")
+            install("typing-extensions==4.16.0")
             // Chaquopy supplies this version for both Python 3.13 Android ABIs.
             install("numpy==1.26.2")
         }

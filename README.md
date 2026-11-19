@@ -14,6 +14,11 @@ Implementation and automated validation are tracked in [Android build and device
 
 The initial artifact is a **debug-signed development build**. A production release must use a persistent owner-controlled signing key; the repository does not contain a private signing key. See [Android build and validation](mobile/android/README.md) and [functional coverage](docs/LASTPHONE_PARITY.md).
 
+For physical Nubia acceptance, use the [hardware test kit and runbook](docs/NUBIA_HARDWARE_TEST.md).
+The kit installs a separate **Lastphone HW test** app, requires actual Vulkan
+inference, and collects model, memory and thermal evidence. The normal alpha
+installation remains separate. A built kit is not a physical-device test result.
+
 ## Install with a portable folder
 
 1. Install the ARM64 APK on Android 10 or newer.

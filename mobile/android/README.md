@@ -137,10 +137,24 @@ execution, the embedded Python engine, web transport and Android lifecycle.
 Vulkan inference is exercised when the emulator exposes a Vulkan backend; the
 log records whether the GPU path or the unavailable-device fallback was tested.
 
-For the same instrumentation on an attached ARM64 phone, prepare the fixtures and
-run `./gradlew connectedPhoneDebugAndroidTest`. This uses an app-private synthetic
-library and changes the test installation's selected data folder. Select the
-intended portable data folder again after testing.
+For physical Nubia acceptance, use the isolated `hardware` flavor and the
+[Nubia runbook](../../docs/NUBIA_HARDWARE_TEST.md). Its application ID is
+`io.github.qqrm.lastphone.hardwaretest`, so integration fixtures do not change the
+normal alpha installation's selected library. The hardware-only test requires
+real Vulkan inference; an unavailable-device fallback cannot pass it.
+
+```bash
+./gradlew --no-daemon assembleHardwareDebug assembleHardwareDebugAndroidTest \
+  lintHardwareDebug testHardwareDebugUnitTest
+cd ../..
+python3 tools/android/package_hardware_kit.py
+```
+
+The ZIP under `dist/` contains both signed APKs, checksum manifest, cross-platform
+USB runner and the manual acceptance checklist. Run the included `preflight`,
+then `smoke`, then `benchmark` with the intended local GGUF. The normal
+`connectedPhoneDebugAndroidTest` task still targets the alpha application ID and
+changes that installation's selected folder; use the isolated kit for acceptance.
 
 ## APK inspection and 16 KB pages
 
